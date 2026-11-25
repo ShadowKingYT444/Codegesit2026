@@ -1,7 +1,9 @@
 // Step 0: replace personal data with consistent fake values before anyone practises.
-// Regex finds emails, phone numbers, IP addresses and other ticket keys. One model pass finds names,
-// addresses and company names in free text. Known author names from Jira are added too.
-// Technical tokens (error codes, versions, product names) stay, because the practice needs them.
+// Regex finds emails, phone numbers and IP addresses. One model pass finds names, addresses and company
+// names in free text. Known author names from Jira are added too.
+// Technical tokens (error codes, versions, product names, reference numbers) stay, because the practice needs them.
+// A value that also appears in the team's own KB or SOP pages is shared team knowledge, not personal data,
+// so it stays too: otherwise the cleaned ticket and the uncleaned KB would no longer match.
 import { PII, PII_SCHEMA, PII_SYS } from './prompts.js';
 
 const FIRST = ['Dana', 'Alex', 'Jordan', 'Sam', 'Robin', 'Taylor', 'Casey', 'Morgan', 'Jamie', 'Avery', 'Riley', 'Quinn', 'Rowan', 'Elliot', 'Noor', 'Kai', 'Imani', 'Mateo', 'Lena', 'Tomas', 'Aiko', 'Ravi', 'Sofia', 'Yusuf'];
@@ -13,7 +15,7 @@ const STREET = ['14 Elm Row', '220 Station Road', '7 Quarry Lane', '91 Canal Str
 function hash(s) { let h = 2166136261; for (const ch of s) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-export function regexFinds(text, { ownKey = '', keepIds = [] } = {}) {
+export function regexFinds(text) {
   const out = [];
   for (const m of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)) out.push({ value: m[0], type: 'email' });
   for (const m of text.matchAll(/(?<![\w.])\+?\d[\d ().-]{7,}\d(?![\w.])/g)) {
@@ -21,10 +23,6 @@ export function regexFinds(text, { ownKey = '', keepIds = [] } = {}) {
     if (digits.length >= 8 && digits.length <= 15 && !/^\d{4}-\d\d-\d\d/.test(m[0]) && !/^[\d.]+$/.test(m[0])) out.push({ value: m[0].trim(), type: 'phone' });
   }
   for (const m of text.matchAll(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g)) out.push({ value: m[0], type: 'ip' });
-  for (const m of text.matchAll(/\b[A-Z][A-Z0-9]{1,9}-\d+\b/g)) {
-    if (m[0] === ownKey || keepIds.includes(m[0]) || /^(KB|SOP)-/.test(m[0])) continue;
-    out.push({ value: m[0], type: 'ticket' });
-  }
   return out;
 }
 
@@ -39,6 +37,8 @@ export function buildMap(items, { keep = [] } = {}) {
   // people first, so emails can reuse fake names
   const order = { person: 0, company: 1, place: 1, address: 1 };
   const sorted = [...items].sort((a, b) => (order[a.type] ?? 2) - (order[b.type] ?? 2));
+  // A fake value must never be one of the real values (a real "Jordan" must not appear as someone's fake name).
+  for (const { value } of items) for (const w of String(value || '').split(/\s+/)) used.add(w);
   for (const { value, type } of sorted) {
     const v = String(value || '').trim();
     if (v.length < 2 || map.has(v) || keepLc.has(v.toLowerCase())) continue;
@@ -46,7 +46,7 @@ export function buildMap(items, { keep = [] } = {}) {
     let fake;
     if (type === 'person') {
       const parts = v.split(/\s+/);
-      const f = pick(FIRST, seed), l = LAST[(seed >>> 8) % LAST.length];
+      const f = pick(FIRST, seed); let l = LAST[(seed >>> 8) % LAST.length]; for (let i = 1; used.has(l) && i < LAST.length; i++) l = LAST[((seed >>> 8) + i) % LAST.length];
       fake = parts.length > 1 ? `${f} ${l}` : f;
       if (parts.length > 1 && parts[0].length > 2 && !map.has(parts[0]) && !keepLc.has(parts[0].toLowerCase())) map.set(parts[0], f);
       if (parts.length > 1 && parts.at(-1).length > 2 && !map.has(parts.at(-1)) && !keepLc.has(parts.at(-1).toLowerCase())) map.set(parts.at(-1), l);
@@ -85,16 +85,22 @@ export function applyMap(text, map) {
 /**
  * Clean a ticket. Returns {ticket: cleaned copy, map: [[real, fake], ...]}.
  * keep: values that must stay (product names, KB titles, system names the lead lists).
+ * shared: the text of the team's KB and SOP pages; a found value that also appears there stays.
+ * Known Jira author names are always replaced, even when a KB page names them.
  */
-export async function cleanTicket(t, llm, { keep = [], keepIds = [] } = {}) {
+export async function cleanTicket(t, llm, { keep = [], shared = '' } = {}) {
   const texts = [t.summary || '', ...t.thread.map((m) => m.body), t.resolution || ''];
   const all = texts.join('\n\n');
-  const items = regexFinds(all, { ownKey: t.key, keepIds });
+  const inShared = (v) => !!shared && new RegExp(`(?<![A-Za-z0-9])${esc(v)}(?![A-Za-z0-9])`, 'i').test(shared);
+  const items = regexFinds(all).filter((it) => !inShared(it.value));
   const names = new Set([t.customer?.name, ...t.thread.map((m) => m.author)].filter(Boolean));
   for (const n of names) items.push({ value: n, type: 'person' });
   try {
     const r = await llm.json(PII_SYS, PII(all), PII_SCHEMA);
-    for (const it of r.items || []) if (it?.value && all.includes(it.value)) items.push({ value: it.value, type: it.type === 'employee_id' || it.type === 'username' ? 'id' : it.type });
+    for (const it of r.items || []) {
+      if (!it?.value || !all.includes(it.value) || inShared(it.value)) continue;
+      items.push({ value: it.value, type: it.type === 'employee_id' || it.type === 'username' ? 'id' : it.type });
+    }
   } catch { /* regex and known names still apply; the lead preview is the second check */ }
   const map = buildMap(items, { keep });
   const A = (s) => applyMap(s, map);

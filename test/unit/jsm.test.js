@@ -15,7 +15,7 @@ const comments = [
   { body: 'Which network are you on?', public: true, author: { accountId: 'agent-1', displayName: 'Sam Agent' }, created: { iso8601: '2026-10-01T10:05:00+0000' } },
   { body: 'Hotel wifi, version 6.1.3', public: true, author: { accountId: 'cust-1', displayName: 'Pat Doe' } },
   { body: 'gp-portal-eu-01 shows IPSec timeout', public: false, author: { accountId: 'agent-1', displayName: 'Sam Agent' } },
-  { body: '[customer] Also my colleague has it too', public: true, author: { accountId: 'agent-1', displayName: 'Sam Agent' } },
+  { body: 'Also my colleague has it too', public: true, author: { accountId: 'cust-1', displayName: 'Pat Doe' } },
   { body: 'Switch to the TCP gateway please', public: true, author: { accountId: 'agent-1', displayName: 'Sam Agent' } },
   { body: '[resolution] Hotel blocked UDP 4501; moved user to TCP gateway per KB.', public: false, author: { accountId: 'agent-1', displayName: 'Sam Agent' } },
 ];
@@ -31,6 +31,14 @@ test('toTicket builds the canonical ticket from JSM shapes', () => {
   assert.equal(t.thread[4].body, 'Also my colleague has it too');
   assert.equal(t.resolution, 'Hotel blocked UDP 4501; moved user to TCP gateway per KB.');
   assert.deepEqual(t.kb_used, ['PAGE-12345']);
+});
+
+test('tag mode: when the reporter is the agent (seeded data), only [customer] lines are customer lines', () => {
+  const seeded = comments.map((c) => ({ ...c, author: { accountId: 'agent-1', displayName: 'Sam Agent' } }));
+  seeded[1] = { ...seeded[1], body: '[customer] Hotel wifi, version 6.1.3' };
+  seeded[3] = { ...seeded[3], body: '[customer] Also my colleague has it too' };
+  const t = toTicket({ issue: { ...issue, fields: { ...issue.fields, reporter: { accountId: 'agent-1', displayName: 'Sam Agent' } } }, req: { ...req, reporter: { accountId: 'agent-1' } }, comments: seeded, links: [] });
+  assert.deepEqual(t.thread.map((m) => m.from), ['customer', 'agent', 'customer', 'agent', 'customer', 'agent']);
 });
 
 test('resolution falls back to the last agent comments', () => {

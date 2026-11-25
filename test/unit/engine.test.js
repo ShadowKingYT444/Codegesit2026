@@ -25,6 +25,7 @@ test('hasTok ignores case and spaces', () => {
 test('parseJson reads fenced and bare JSON', () => {
   assert.deepEqual(parseJson('```json\n{"a":1}\n```'), { a: 1 });
   assert.deepEqual(parseJson('Sure! {"a": {"b": 2}} done'), { a: { b: 2 } });
+  assert.deepEqual(parseJson('{"verdict": "solved", "why": "a } in text"}\n\n{"extra": 1}'), { verdict: 'solved', why: 'a } in text' });
   assert.throws(() => parseJson('no json'));
 });
 

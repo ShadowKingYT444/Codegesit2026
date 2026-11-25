@@ -33,7 +33,20 @@ export function parseJson(text) {
   const t = m ? m[1] : String(text);
   const i = t.indexOf('{');
   if (i < 0) throw new Error('no JSON object in model output');
-  return JSON.parse(t.slice(i, t.lastIndexOf('}') + 1));
+  try {
+    return JSON.parse(t.slice(i, t.lastIndexOf('}') + 1));
+  } catch (e) {
+    // Fallback: the first balanced object (the model added text or a second object after it).
+    let depth = 0, str = false, esc = false;
+    for (let j = i; j < t.length; j++) {
+      const ch = t[j];
+      if (str) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') str = false; continue; }
+      if (ch === '"') str = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}' && --depth === 0) return JSON.parse(t.slice(i, j + 1));
+    }
+    throw e;
+  }
 }
 
 export const customerMessages = (t) => t.thread.filter((m) => m.from === 'customer');

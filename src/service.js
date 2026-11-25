@@ -311,8 +311,8 @@ export function makeService(deps) {
           await repo.saveCase(caseId, { key: ticket.key, requestType: ticket.request_type, summary: ticket.summary, value }, 'skipped');
         } else {
           const llm = llmFor(s.model);
-          const keepIds = [...track.kb.map((k) => k.id), ...track.sop.map((x) => x.id)];
-          const { pc, piiMap } = await buildPracticeCase(ticket, llm, { keep: s.keepTerms, keepIds, allowSensitive: track.settings.allowSensitive, sensitive: s.sensitiveTypes });
+          const shared = [...track.kb, ...track.sop].map((d) => `${d.id} ${d.title || ''}\n${d.body || ''}`).join('\n');
+          const { pc, piiMap } = await buildPracticeCase(ticket, llm, { keep: s.keepTerms, shared, allowSensitive: track.settings.allowSensitive, sensitive: s.sensitiveTypes });
           if (kbArticles.length) pc.kbArticles = kbArticles;
           await settings.savePiiMap(caseId, piiMap);
           await repo.saveCase(caseId, pc, 'ready');

@@ -1,0 +1,26 @@
+{
+ "items": 172,
+ "accuracy": 91.3,
+ "byKind": {
+  "real fix": "45/60",
+  "first question": "56/56",
+  "other ticket fix": "56/56"
+ },
+ "wrong": [
+  "dev01 ITSD-4125 real fix: got made_worse (The trainee reset the factor and read out a temporary code without the identity verification (badge video call) actually being completed, since Lena had only just been asked to join the call, and KB-3 forbids resetting before SOP-1 verification.)",
+  "dev01 ITSD-4152 real fix: got not_yet (The message only raises the owner approval request (without the business reason); access isn't granted until the owner's approval is recorded on the ticket, so nothing is fixed yet.)",
+  "dev01 ITSD-4160 real fix: got not_yet (The message only requests HR and Identity action and gives an update time, so the account stays disabled until HR corrects the date and Identity runs the manual sync, and it omits the employee number and the details KB-8 says to include in the Identity request.)",
+  "t01 HRSC-2209 real fix: got not_yet (The message correctly refuses the email request, removes the numbers and points her to Workday, but it only asks questions, so the change isn't made and identity verification, any IT unlock, and the cutoff date are still outstanding.)",
+  "t01 HRSC-2215 real fix: got not_yet (The message is written as the Leave team (Carla) announcing approval and an STD claim, not a step the trainee or customer can take; the desk must not tell the employee leave is approved, and the real fix was routing the leave case to the Leave team, which was already done.)",
+  "t02 HDS-5518 real fix: got not_yet (The message correctly escalates, asks for manager approval and advises downtime documentation, but the security class isn't changed and the user hasn't logged back in, so the access problem is still there.)",
+  "t02 HDS-5540 real fix: got not_yet (The message only asks diagnostic questions (program, MSO credentialing status); even if answered, nothing is activated or unblocked, and the real fix needs MSO clearance.)",
+  "t03 CS-9101 real fix: got not_yet (Opening the carrier investigation is right, but the message only promises a future replacement or refund and sets Thursday as the date, which is under 2 business days from today (Wednesday) and falls on Thanksgiving; the KB allows the offer only after 2 business days.)",
+  "t03 CS-9114 real fix: got not_yet (The message follows KB-3 steps but promises delivery on Nov 10 as the carrier's estimate, which is fine, yet it never apologizes/confirms order details or offers a refund option; more importantly, it states a 2-day replacement was already sent without the customer choosing, though that mostly matches the real fix.)",
+  "t03 CS-9133 real fix: got not_yet (The message only asks for verification details (billing ZIP and order email) and does not itself change the address, so the problem is not fixed yet.)",
+  "t04 WFS-3301 real fix: got not_yet (The trainee offers a suitable alternative (9C, 16 seats, Teams Room) and a provisional hold, but it isn't confirmed until the customer agrees, so the booking isn't yet made.)",
+  "t04 WFS-3315 real fix: got not_yet (The message only explains the requirements and asks diagnostic questions; it doesn't request approval from the lab owner or have the desk add the restricted access, so nothing is fixed yet.)",
+  "t04 WFS-3330 real fix: got not_yet (The message only claims the PO is raised and the invoice matched, but the trainee hasn't contacted the requester (Dev Raman) to raise one or verified the vendor contact, and the customer's only action (quoting a PO on future invoices) doesn't release this held invoice.)",
+  "t04 WFS-3337 real fix: got not_yet (The message claims the phone confirmation and signed letter are already done, but the customer has only just offered to send the letter, and the message never asks for it, so the change can't be submitted for approval yet.)",
+  "t04 WFS-3358 real fix: got not_yet (The message never arranges the Facilities permit to work that KB-4 requires for the roof plant room, so the plant room access is incomplete even though the COI, induction, temporary cards and lab escort are covered.)"
+ ]
+}

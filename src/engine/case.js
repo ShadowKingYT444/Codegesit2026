@@ -7,9 +7,9 @@ import { practiceValue } from './scoring.js';
  * t: canonical ticket {key, request_type, summary, customer, thread, resolution, kb_used}
  * Returns {pc, piiMap}. pc is safe to store: it holds only cleaned text.
  */
-export async function buildPracticeCase(t, llm, { keep = [], keepIds = [], allowSensitive = false, sensitive = [] } = {}) {
+export async function buildPracticeCase(t, llm, { keep = [], shared = '', allowSensitive = false, sensitive = [] } = {}) {
   const value = practiceValue(t, { allowSensitive, sensitive });
-  const { ticket: c, map } = await cleanTicket(t, llm, { keep, keepIds });
+  const { ticket: c, map } = await cleanTicket(t, llm, { keep, shared });
   const customer = await buildCustomerCard(c, llm);
   const pc = {
     key: c.key,

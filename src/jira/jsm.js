@@ -56,13 +56,17 @@ export function toTicket({ issue, req, comments, links }) {
   const opening = cleanText(adfToText(f.description)) || cleanText(f.summary);
   thread.push({ from: 'customer', author: reporterName, public: true, body: opening, date: f.created });
   let resolutionNote = '';
+  const textOf = (c) => cleanText(typeof c.body === 'string' ? c.body : adfToText(c.body));
+  // Seeded demo data is posted by one account, so it marks customer lines with [customer]. When any line is tagged,
+  // only tagged lines count as the customer's.
+  const tagMode = comments.some((c) => CUSTOMER_TAG.test(textOf(c)));
   for (const c of comments) {
-    let body = cleanText(typeof c.body === 'string' ? c.body : adfToText(c.body));
+    let body = textOf(c);
     if (!body) continue;
     if (RESOLUTION_TAG.test(body)) { resolutionNote = body.replace(RESOLUTION_TAG, ''); if (c.public === false) continue; }
     const tagged = CUSTOMER_TAG.test(body);
     if (tagged) body = body.replace(CUSTOMER_TAG, '');
-    const isCustomer = tagged || (c.author?.accountId && c.author.accountId === reporterId && c.public !== false);
+    const isCustomer = tagMode ? tagged : !!(c.author?.accountId && c.author.accountId === reporterId && c.public !== false);
     thread.push({ from: isCustomer ? 'customer' : 'agent', author: isCustomer ? reporterName : (c.author?.displayName || 'Agent'), public: c.public !== false, body, date: c.created?.iso8601 || c.created });
   }
   const agentMsgs = thread.filter((m) => m.from === 'agent');
