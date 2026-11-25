@@ -1,0 +1,150 @@
+modules:
+  jiraServiceManagement:queuePage:
+    - key: ride-along-queue-page
+      resource: practice-ui
+      resolver:
+        function: resolver
+      title: Ride-Along practice
+  jira:projectPage:
+    - key: ride-along-project-page
+      resource: practice-ui
+      resolver:
+        function: resolver
+      title: Ride-Along
+  jira:globalPage:
+    - key: ride-along-lead-page
+      resource: practice-ui
+      resolver:
+        function: resolver
+      title: Ride-Along leads
+  rovo:agent:
+    - key: ride-along-coach
+      name: Ride-Along Coach
+      description: Picks practice tickets for new service desk agents, explains their weak spots and tells leads who is ready for the live queue.
+      prompt: >
+        You are the Ride-Along Coach. Ride-Along lets new Jira Service Management agents practise on their team's own
+        solved tickets: an AI plays the real customer and each reply is graded against the KB, the SOPs and the real fix.
+
+        Use start-practice when a user wants a ticket to practise (pass a request type if they name one).
+        Use weak-spots when a user asks what they get wrong, or a lead asks about one trainee.
+        Use queue-readiness when a lead asks who is ready for the live queue.
+        Use build-track when a lead gives a JQL filter of solved tickets to turn into practice.
+
+        Read back the action result in plain words. Never invent scores or ticket details that the actions did not return.
+        You never see the real ticket of a practice case, so never guess its solution.
+      conversationStarters:
+        - Give me a hard VPN ticket to practise
+        - What do I keep getting wrong?
+        - Who is ready for the queue?
+      actions:
+        - start-practice
+        - weak-spots
+        - queue-readiness
+        - build-track
+  action:
+    - key: start-practice
+      name: Start practice run
+      function: action-start-practice
+      actionVerb: CREATE
+      description: Start a Ride-Along practice run for the current user on the ticket that best trains their weak spots.
+      inputs:
+        requestType:
+          title: Request type
+          type: string
+          required: false
+          description: Optional request type to practise, for example VPN or Password.
+    - key: weak-spots
+      name: Show weak spots
+      function: action-weak-spots
+      actionVerb: GET
+      description: Show a trainee's error counts by error type and by request type, plus the next suggested practice tickets.
+      inputs:
+        accountId:
+          title: Account id
+          type: string
+          required: false
+          description: Trainee account id. Leave empty for the current user. Only leads can read other trainees.
+    - key: queue-readiness
+      name: Show queue readiness
+      function: action-queue-readiness
+      actionVerb: GET
+      description: For leads. List each trainee's progress per practice track and whether they look ready for the live queue.
+      inputs:
+        track:
+          title: Track name
+          type: string
+          required: false
+          description: Optional track name filter.
+    - key: build-track
+      name: Build practice track
+      function: action-build-track
+      actionVerb: CREATE
+      description: For leads. Build a practice track from a JQL filter of solved service desk tickets.
+      inputs:
+        jql:
+          title: JQL filter
+          type: string
+          required: true
+          description: JQL that finds solved tickets, for example project = ITSD AND resolution = Done AND created > -180d
+        name:
+          title: Track name
+          type: string
+          required: false
+          description: A name for the practice track.
+  consumer:
+    - key: case-builder-consumer
+      queue: case-builder
+      resolver:
+        function: build-case
+        method: build
+    - key: practice-turn-consumer
+      queue: practice-turns
+      resolver:
+        function: run-turn
+        method: turn
+  scheduledTrigger:
+    - key: retention-cleanup
+      function: cleanup
+      interval: day
+  function:
+    - key: resolver
+      handler: index.resolver
+    - key: build-case
+      handler: index.buildCase
+      timeoutSeconds: 900
+    - key: run-turn
+      handler: index.runTurn
+      timeoutSeconds: 900
+    - key: cleanup
+      handler: index.cleanup
+    - key: action-start-practice
+      handler: index.startPractice
+    - key: action-weak-spots
+      handler: index.weakSpots
+    - key: action-queue-readiness
+      handler: index.queueReadiness
+    - key: action-build-track
+      handler: index.buildTrack
+  sql:
+    - key: main
+      engine: mysql
+  llm:
+    - key: ride-along-llm
+      model:
+        - claude
+resources:
+  - key: practice-ui
+    path: static/practice/build
+app:
+  id: ari:cloud:ecosystem::app/00000000-0000-0000-0000-000000000000
+  runtime:
+    name: nodejs22.x
+permissions:
+  scopes:
+    - read:jira-work
+    - read:jira-user
+    - read:servicedesk-request
+    - read:confluence-content.all
+    - read:page:confluence
+    - search:confluence
+    - storage:app
