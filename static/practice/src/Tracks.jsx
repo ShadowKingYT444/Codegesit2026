@@ -17,7 +17,7 @@ export default function Tracks({ go, ctx }) {
       </header>
       <ErrorBox error={list.error} onRetry={list.reload} />
       {showNew && <NewTrack ctx={ctx} onDone={(id) => { setShowNew(false); list.reload(); go('track', { trackId: id }); }} />}
-      {list.data && list.data.length === 0 && !showNew && <Empty title="No tracks yet">Start with a demo pack to see Ride-Along work in two minutes, then build a track from your own solved tickets.</Empty>}
+      {list.data && list.data.length === 0 && !showNew && <Empty title="No tracks yet">AI now answers the easy tickets that used to train new agents. Ride-Along turns your solved tickets into safe practice reps. Start with a demo pack: it is ready at once. Then build a track from your own solved tickets.</Empty>}
       <div className="cards">
         {(list.data || []).map((t) => (
           <button key={t.id} className="card action" onClick={() => go('track', { trackId: t.id })}>

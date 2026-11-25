@@ -151,3 +151,17 @@ ul.plain li, ol.plain li { padding: 4px 0; }
   .kb { position: static; max-height: none; }
   .msg { max-width: 100%; }
 }
+
+/* the grade arrives after the customer reply */
+.grading { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.grading .dots i { width: 4px; height: 4px; }
+.grade-in { animation: fadein .35s ease-out; }
+@keyframes fadein { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .grade-in { animation: none; } }
+
+/* lead summary tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.tile { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+.tile-n { font-size: 24px; font-weight: 600; line-height: 1.2; }
+.tile-of { font-size: 14px; font-weight: 400; color: var(--muted); }
+.tile-l { color: var(--muted); font-size: 12px; margin-top: 2px; }

@@ -27,6 +27,9 @@ describe('trainee flow', () => {
     const box = screen.getByLabelText('Your reply to the customer');
     fireEvent.change(box, { target: { value: 'What network are you on right now?' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    // the customer reply shows first, while the grade is still on its way
+    expect(await screen.findByText(/Checking your reply against the KB/, {}, T)).toBeTruthy();
+    expect(screen.queryByText(/Clear, specific question/)).toBeNull();
     expect(await screen.findByText(/Clear, specific question/, {}, T)).toBeTruthy();
 
     fireEvent.change(box, { target: { value: 'Please reinstall GlobalProtect.' } });
@@ -83,6 +86,8 @@ describe('lead flow', () => {
     fireEvent.click(await screen.findByRole('tab', { name: 'Team' }, T));
     expect(await screen.findByText('Team progress', {}, T)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Confirm ready' })).toBeTruthy();
+    expect(screen.getByText('practice reps this week')).toBeTruthy();
+    expect(screen.getByText('median reps to ready')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Jordan Lee' }));
     expect(await screen.findByText('Errors by type', { exact: false }, T)).toBeTruthy();
     expect(screen.getByText('Next practice tickets')).toBeTruthy();

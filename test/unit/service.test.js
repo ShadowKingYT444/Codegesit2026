@@ -176,3 +176,50 @@ test('demo KB search works inside a run', async () => {
   assert.equal(hits[0].id, 'KB-1');
   assert.ok((await app.svc.kbArticle(TRAINEE, run.id, 'KB-1')).body.length > 100);
 });
+
+test('a demo track with prebuilt cases is ready at once, with no model calls', async () => {
+  const { PREBUILT } = await import('../../src/demo/prebuilt.js');
+  const app = await testApp({ prebuilt: PREBUILT });
+  const r = await app.svc.createTrack(LEAD, { source: 'demo', packId: 'it', name: 'IT basics' });
+  assert.equal(r.ready, r.cases);
+  assert.equal(app.llm.usage.calls, 0, 'no model calls');
+  const tracks = await app.svc.listTracks(LEAD);
+  assert.equal(tracks[0].status, 'ready');
+  assert.equal(tracks[0].cases.ready, r.cases);
+  // no real customer name in any prebuilt case of the pack
+  const detail = await app.svc.trackDetail(LEAD, r.id);
+  for (const c of detail.cases) assert.ok(!JSON.stringify(await app.svc.caseDetail(LEAD, c.id)).includes('Priya Raman'));
+});
+
+test('the customer reply is saved before the grade, then the grade lands', async () => {
+  const app = await testApp();
+  const trackId = await readyTrack(app);
+  await app.svc.assign(LEAD, trackId, [TRAINEE]);
+  const detail = await app.svc.trackDetail(LEAD, trackId);
+  const vpn = detail.cases.find((c) => c.key === 'ITSD-4102');
+  const run = await app.svc.startRun(TRAINEE, vpn.id);
+  const seen = [];
+  const orig = app.repo.saveReply;
+  app.repo.saveReply = async (id, v) => { await orig(id, v); seen.push((await app.repo.getTurn(id)).status); };
+  const { turnId } = await app.svc.send(TRAINEE, run.id, 'What network are you on, and does a normal website load?');
+  await app.drain();
+  assert.deepEqual(seen, ['replied']);
+  const t = await app.svc.getTurn(TRAINEE, turnId);
+  assert.equal(t.turn.status, 'done');
+  assert.ok(t.turn.reply && t.turn.grade);
+});
+
+test('lead dashboard summary: reps this week, ready trainees, reps to ready', async () => {
+  const app = await testApp();
+  const trackId = await readyTrack(app);
+  await app.svc.assign(LEAD, trackId, [TRAINEE]);
+  const caseId = (await app.svc.trackDetail(LEAD, trackId)).cases.find((c) => c.key === 'ITSD-4102').id;
+  const run = await app.svc.startRun(TRAINEE, caseId);
+  await app.svc.endRun(TRAINEE, run.id);
+  const d = await app.svc.dashboard(LEAD);
+  assert.equal(d.summary.trainees, 1);
+  assert.equal(d.summary.repsWeek, 1);
+  assert.equal(d.summary.readyConfirmed, 0);
+  assert.equal(d.summary.repsToReady, null);
+  assert.equal(d.trainees[0].tracks[0].reps, 1);
+});

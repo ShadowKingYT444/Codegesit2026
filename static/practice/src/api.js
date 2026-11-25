@@ -22,12 +22,12 @@ export async function moduleKey() {
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Poll a practice turn until the customer has answered (or the call failed). */
-export async function waitForTurn(turnId, { every = 1500, max = 240000 } = {}) {
+/** Poll a practice turn until the customer has answered (or the call failed). With grade: true, also wait for the grade. */
+export async function waitForTurn(turnId, { every = 1000, max = 240000, grade = false } = {}) {
   const t0 = Date.now();
   for (;;) {
     const r = await call('getTurn', { turnId });
-    if (r.turn.status !== 'pending') return r;
+    if (r.turn.status !== 'pending' && !(grade && r.turn.status === 'replied')) return r;
     if (Date.now() - t0 > max) throw new Error('The customer is taking too long. Refresh to check again.');
     await sleep(every);
   }

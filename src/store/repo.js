@@ -8,7 +8,7 @@ export const newId = (p) => `${p}_${globalThis.crypto.randomUUID().replace(/-/g,
 export function makeRepo(d, now = () => Date.now()) {
   const one = async (q, p) => (await d.query(q, p))[0] || null;
   const track = (r) => r && ({ id: r.id, name: r.name, source: r.source, projectKey: r.project_key, jql: r.jql, settings: P(r.settings_json, {}), sop: P(r.sop_json, []), kb: P(r.kb_json, []), status: r.status, createdBy: r.created_by, createdAt: Number(r.created_at) });
-  const kase = (r, full = true) => r && ({ id: r.id, trackId: r.track_id, key: r.ticket_key, requestType: r.request_type, summary: r.summary, status: r.status, score: r.score, error: r.error, createdAt: Number(r.created_at), ...(full ? P(r.case_json, {}) : {}), id: r.id });
+  const kase = (r, full = true) => r && ({ trackId: r.track_id, key: r.ticket_key, requestType: r.request_type, summary: r.summary, status: r.status, score: r.score, error: r.error, createdAt: Number(r.created_at), ...(full ? P(r.case_json, {}) : {}), id: r.id });
   const run = (r) => r && ({ id: r.id, caseId: r.case_id, trackId: r.track_id, accountId: r.account_id, kind: r.kind, status: r.status, state: P(r.state_json, { given: [], turns: [], replies: [] }), usage: P(r.usage_json, { calls: 0, input: 0, output: 0 }), startedAt: Number(r.started_at), endedAt: r.ended_at == null ? null : Number(r.ended_at) });
   const turn = (r) => r && ({ id: r.id, runId: r.run_id, n: r.n, accountId: r.account_id, requestType: r.request_type, trainee: r.trainee_msg, reply: r.customer_reply, released: P(r.released_json, []), kind: r.kind, verdict: r.verdict, grade: P(r.grade_json, null), mark: r.mark, status: r.status, error: r.error, createdAt: Number(r.created_at) });
 
@@ -76,6 +76,10 @@ export function makeRepo(d, now = () => Date.now()) {
     },
     finishTurn: (id, { reply, released, kind, verdict, grade, mark }) => d.exec('UPDATE turns SET customer_reply = ?, released_json = ?, kind = ?, verdict = ?, grade_json = ?, mark = ?, status = ? WHERE id = ?',
       [reply, J(released), kind, verdict, J(grade), mark, 'done', id]),
+    // two-step finish: the customer reply is shown first ('replied'), the grade lands a moment later ('done')
+    saveReply: (id, { reply, released, kind, verdict }) => d.exec('UPDATE turns SET customer_reply = ?, released_json = ?, kind = ?, verdict = ?, status = ? WHERE id = ?',
+      [reply, J(released), kind, verdict, 'replied', id]),
+    saveGrade: (id, { grade, mark }) => d.exec('UPDATE turns SET grade_json = ?, mark = ?, status = ? WHERE id = ?', [J(grade), mark, 'done', id]),
     failTurn: (id, error) => d.exec('UPDATE turns SET status = ?, error = ? WHERE id = ?', ['failed', String(error).slice(0, 2000), id]),
     getTurn: async (id) => turn(await one('SELECT * FROM turns WHERE id = ?', [id])),
     turnsForRun: async (runId) => (await d.query('SELECT * FROM turns WHERE run_id = ? ORDER BY n', [runId])).map(turn),

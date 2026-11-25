@@ -9,6 +9,7 @@
 //   confluence,                // jira/confluence.js (as the app)
 //   users: { isLead(accountId), names(accountIds) -> {id: name}, search(q) -> [{accountId, displayName}] },
 //   enqueue: { buildCase(caseIds[]), runTurn(turnId) },
+//   prebuilt,                  // optional: demo cases keyed 'packId:ticketKey' (default: src/demo/prebuilt.js)
 //   now()
 // }
 import { reveal, speak } from './engine/customer.js';
@@ -19,13 +20,16 @@ import { practiceValue } from './engine/scoring.js';
 import { weakSpots, nextPicks, readiness } from './engine/coach.js';
 import { BM25 } from './engine/bm25.js';
 import { packById, PACKS } from './demo/packs.js';
+import { PREBUILT } from './demo/prebuilt.js';
 
 export class AppError extends Error { constructor(code, message) { super(message); this.code = code; } }
 const fail = (code, msg) => { throw new AppError(code, msg); };
 const MAX_MSG = 4000;
+const answered = (t) => t.status === 'done' || t.status === 'replied';
 
 export function makeService(deps) {
   const { repo, settings, llmFor, users, enqueue } = deps;
+  const prebuilt = deps.prebuilt || PREBUILT;
   const now = deps.now || (() => Date.now());
 
   const requireLead = async (accountId) => { if (!(await users.isLead(accountId))) fail('forbidden', 'Only Ride-Along leads can do this.'); };
@@ -109,7 +113,7 @@ export function makeService(deps) {
       return { id: run.id, kind: run.kind, status: run.status, startedAt: run.startedAt, endedAt: run.endedAt, turnLimit: s.turnLimit, case: traineeCaseView(c), turns: (await repo.turnsForRun(runId)).map((t) => turnView(t, { lead: lead && run.kind === 'preview' })) };
     },
 
-    async send(accountId, runId, text) {
+    async send(accountId, runId, text, { inline = false } = {}) {
       const run = await loadRunFor(accountId, runId);
       if (run.accountId !== accountId) fail('forbidden', 'Only the trainee can reply in this run.');
       if (run.status !== 'active') fail('closed', 'This run has ended.');
@@ -118,12 +122,13 @@ export function makeService(deps) {
       const turns = await repo.turnsForRun(runId);
       if (turns.some((t) => t.status === 'pending')) fail('busy', 'The customer is still answering your last reply.');
       const s = await settings.get();
-      const done = turns.filter((t) => t.status === 'done').length;
+      const done = turns.filter(answered).length;
       if (done >= s.turnLimit) fail('closed', 'Turn limit reached.');
       // a failed turn is replaced by the new one
-      const n = turns.filter((t) => t.status === 'done').length + 1;
+      const n = done + 1;
       const c = await repo.getCase(run.caseId);
       const id = await repo.addTurn({ runId, n, accountId, requestType: c.requestType, trainee: msg });
+      if (inline) { await service.processTurn(id); return { turnId: id }; } // MCP and Rovo actions wait for the answer
       await enqueue.runTurn(id);
       return { turnId: id };
     },
@@ -133,6 +138,12 @@ export function makeService(deps) {
       if (!t) fail('not_found', 'Turn not found.');
       const run = await loadRunFor(accountId, t.runId);
       return { turn: turnView(t, { lead: run.kind === 'preview' }), runStatus: run.status };
+    },
+
+    /** The caller's newest practice run (optionally only an active or only an ended one). For chat and MCP clients. */
+    async latestRun(accountId, { active } = {}) {
+      const runs = (await repo.runsFor(accountId)).filter((r) => active == null || (r.status === 'active') === active);
+      return runs[0] || null;
     },
 
     async endRun(accountId, runId) {
@@ -145,7 +156,7 @@ export function makeService(deps) {
       const run = await loadRunFor(accountId, runId);
       if (run.status === 'active') fail('closed', 'Finish or end the run to see the real ticket.');
       const c = await repo.getCase(run.caseId);
-      const turns = (await repo.turnsForRun(runId)).filter((t) => t.status === 'done');
+      const turns = (await repo.turnsForRun(runId)).filter(answered);
       return {
         case: traineeCaseView(c), status: run.status,
         realThread: c.debrief, resolution: c.resolution,
@@ -192,13 +203,19 @@ export function makeService(deps) {
           const r = await speak(pc.customer, state, t.trainee, release, llm, verdict);
           return { ...r, release, kind, verdict, why };
         })();
-        const gradePart = run.kind === 'preview' ? Promise.resolve(null) : gradeReply(pc, kbPool, track.sop, { turns: state.turns, replies: state.replies }, t.trainee, llm);
-        const [cust, grade] = await Promise.all([customerPart, gradePart]);
-        await repo.finishTurn(turnId, { reply: cust.reply, released: cust.release, kind: cust.kind, verdict: cust.verdict, grade, mark: grade?.mark || null });
-        const usage = { calls: run.usage.calls + llm.usage.calls, input: run.usage.input + llm.usage.input, output: run.usage.output + llm.usage.output };
-        await repo.saveRunState(run.id, cust.state, usage);
+        // the grade starts at the same time, but the customer reply is saved (and shown) as soon as it is ready
+        const gradePart = (run.kind === 'preview' ? Promise.resolve(null) : gradeReply(pc, kbPool, track.sop, { turns: state.turns, replies: state.replies }, t.trainee, llm))
+          .catch((e) => ({ failed: e.message || String(e) }));
+        const cust = await customerPart;
+        await repo.saveReply(turnId, { reply: cust.reply, released: cust.release, kind: cust.kind, verdict: cust.verdict });
+        await repo.saveRunState(run.id, cust.state, run.usage);
         if (cust.verdict === 'solved') await repo.endRun(run.id, 'solved');
         else if (cust.state.turns.length >= s.turnLimit) await repo.endRun(run.id, 'limit');
+        const grade = await gradePart;
+        const ok = grade && !grade.failed ? grade : null;
+        await repo.saveGrade(turnId, { grade: ok, mark: ok?.mark || null });
+        const usage = { calls: run.usage.calls + llm.usage.calls, input: run.usage.input + llm.usage.input, output: run.usage.output + llm.usage.output };
+        await repo.saveRunState(run.id, cust.state, usage);
         return { done: true, verdict: cust.verdict };
       } catch (e) {
         await repo.failTurn(turnId, e.message || String(e));
@@ -231,10 +248,17 @@ export function makeService(deps) {
       if (source === 'demo') {
         const pack = packById(packId) || fail('bad_request', 'Unknown demo pack.');
         const id = await repo.createTrack({ name: name || pack.title, source, settings: trackSettings, sop: pack.sop, kb: pack.kb, createdBy: accountId });
-        const caseIds = [];
-        for (const t of pack.tickets.slice(0, s.maxCasesPerTrack)) caseIds.push(await repo.addCase({ trackId: id, key: t.key, requestType: t.request_type, summary: t.summary }));
-        await enqueue.buildCase(caseIds);
-        return { id, cases: caseIds.length };
+        // demo cases are prebuilt (scripts/prebuild-demo.mjs), so a demo track is ready at once with no model calls
+        const toBuild = [];
+        let ready = 0;
+        for (const t of pack.tickets.slice(0, s.maxCasesPerTrack)) {
+          const cid = await repo.addCase({ trackId: id, key: t.key, requestType: t.request_type, summary: t.summary });
+          const pre = prebuilt[`${pack.id}:${t.key}`];
+          if (pre) { await repo.saveCase(cid, structuredClone(pre), 'ready'); ready++; } else toBuild.push(cid);
+        }
+        if (toBuild.length) await enqueue.buildCase(toBuild);
+        else await repo.setTrackStatus(id, 'ready');
+        return { id, cases: ready + toBuild.length, ready };
       }
       if (source !== 'jsm') fail('bad_request', 'Pick a source.');
       if (!String(jql || '').trim()) fail('bad_request', 'Enter a JQL filter of solved tickets.');
@@ -356,7 +380,8 @@ export function makeService(deps) {
         const tr = await repo.getTrack(tid); if (!tr) continue;
         const cases = (await repo.listCases(tid, { full: true })).filter((c) => c.status === 'ready');
         pool.push(...cases);
-        tracks.push({ id: tid, name: tr.name, ...readiness(cases.map((c) => c.id), solvedCases, marks), confirmed: marksConfirmed.some((m) => m.trackId === tid) });
+        const reps = ended.filter((r) => r.trackId === tid).length; // practice reps on this track so far
+        tracks.push({ id: tid, name: tr.name, ...readiness(cases.map((c) => c.id), solvedCases, marks), confirmed: marksConfirmed.some((m) => m.trackId === tid), reps });
       }
       const avg = (xs) => (xs.length ? Math.round((xs.reduce((a, c) => a + c, 0) / xs.length) * 10) / 10 : null);
       return {
@@ -365,6 +390,7 @@ export function makeService(deps) {
         turnsToSolve: avg(solvedRuns.map((r) => r.state.turns.length)),
         greenRate: marks.length ? Math.round((marks.filter((m) => m === 'green').length / marks.length) * 100) : null,
         weakSpots: spots, tracks, picks: nextPicks(pool, spots, solvedCases),
+        endedAt: ended.map((r) => r.endedAt || r.startedAt),
         recentRuns: runs.slice(0, 10).map((r) => ({ id: r.id, caseId: r.caseId, status: r.status, turns: r.state.turns.length, startedAt: r.startedAt })),
         cost: runs.reduce((a, r) => ({ calls: a.calls + r.usage.calls, input: a.input + r.usage.input, output: a.output + r.usage.output }), { calls: 0, input: 0, output: 0 }),
       };
@@ -377,7 +403,22 @@ export function makeService(deps) {
       const trainees = [];
       for (const id of ids) trainees.push({ name: names[id] || id, ...(await service.traineeStats(accountId, id)) });
       const graded = trainees.reduce((a, t) => a + t.weakSpots.turns, 0);
-      return { trainees, overrides: await repo.overrideCount(), gradedTurns: graded };
+      const overrides = await repo.overrideCount();
+      // the numbers a lead reads first: practice volume, who is ready, and how many reps it took
+      const weekAgo = now() - 7 * 86400000;
+      const repsWeek = trainees.reduce((a, t) => a + t.endedAt.filter((at) => at >= weekAgo).length, 0);
+      const trackRows = trainees.flatMap((t) => t.tracks);
+      const readyReps = trackRows.filter((tr) => tr.ready || tr.confirmed).map((tr) => tr.reps).sort((x, y) => x - y);
+      const median = readyReps.length ? readyReps[Math.floor((readyReps.length - 1) / 2)] : null;
+      const summary = {
+        trainees: trainees.length,
+        repsWeek,
+        readyConfirmed: trainees.filter((t) => t.tracks.some((tr) => tr.confirmed)).length,
+        readyPending: trainees.filter((t) => t.tracks.some((tr) => tr.ready && !tr.confirmed)).length,
+        repsToReady: median,
+        overrideRate: graded ? Math.round((overrides / graded) * 100) : null,
+      };
+      return { trainees, overrides, gradedTurns: graded, summary };
     },
 
     async confirmReady(accountId, traineeId, trackId) {

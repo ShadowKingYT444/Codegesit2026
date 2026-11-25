@@ -6,12 +6,20 @@ export default function Team({ go }) {
   const d = useLoad(() => call('dashboard'));
   if (d.loading && !d.data) return <Spinner />;
   if (d.error) return <ErrorBox error={d.error} onRetry={d.reload} />;
-  const { trainees, overrides, gradedTurns } = d.data;
+  const { trainees, overrides, gradedTurns, summary } = d.data;
   if (!trainees.length) return <Empty title="No trainees yet">Assign a practice track to someone to see their progress here. <button className="link" onClick={() => go('tracks')}>Go to tracks</button></Empty>;
   const confirm = async (accountId, trackId) => { await call('confirmReady', { accountId, trackId }); d.reload(); };
   return (
     <div className="stack">
       <header><h1>Team progress</h1><p className="muted">Solve rate, turns to solution and errors from each trainee's last 20 graded replies.</p></header>
+      {summary && (
+        <div className="tiles" role="list" aria-label="Team summary">
+          <div className="tile" role="listitem"><div className="tile-n">{summary.repsWeek}</div><div className="tile-l">practice reps this week</div></div>
+          <div className="tile" role="listitem"><div className="tile-n">{summary.readyConfirmed}<span className="tile-of"> / {summary.trainees}</span></div><div className="tile-l">ready for the live queue{summary.readyPending ? ` · ${summary.readyPending} to confirm` : ''}</div></div>
+          <div className="tile" role="listitem"><div className="tile-n">{summary.repsToReady ?? '–'}</div><div className="tile-l">median reps to ready</div></div>
+          <div className="tile" role="listitem"><div className="tile-n">{pct(summary.overrideRate)}</div><div className="tile-l">grades marked wrong by leads</div></div>
+        </div>
+      )}
       <div className="panel">
         <table className="table">
           <thead><tr><th>Trainee</th><th>Runs</th><th>Solve rate</th><th>Turns to solve</th><th>Clean replies</th><th>Weak spots</th><th>Queue readiness</th></tr></thead>

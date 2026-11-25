@@ -12,7 +12,7 @@ export default function Home({ go, ctx }) {
   if (!tracks.length) {
     return (
       <Empty title="No practice track yet">
-        {ctx.isLead ? <>Build a track from your solved tickets or a demo pack, then assign it to trainees. <button className="link" onClick={() => go('tracks')}>Build a track</button></> : 'Ask your team lead to assign you a Ride-Along practice track.'}
+        {ctx.isLead ? <>Give new agents practice reps on your own solved tickets, before they meet a live customer. Build a track from your solved tickets or a demo pack, then assign it to trainees. <button className="link" onClick={() => go('tracks')}>Build a track</button></> : 'Ask your team lead to assign you a Ride-Along practice track.'}
       </Empty>
     );
   }

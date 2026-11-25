@@ -48,7 +48,7 @@ export function fakeLlm(over = {}) {
 }
 
 /** A whole app: service + repo on in-memory sqlite. Queued jobs run when drain() is called. */
-export async function testApp({ leads = ['lead-1'], llm = fakeLlm(), names = {} } = {}) {
+export async function testApp({ leads = ['lead-1'], llm = fakeLlm(), names = {}, prebuilt = {} } = {}) {
   const repo = makeRepo(sqliteDriver(DatabaseSync));
   await repo.migrate();
   const kv = memoryKv();
@@ -57,6 +57,7 @@ export async function testApp({ leads = ['lead-1'], llm = fakeLlm(), names = {} 
   const svc = makeService({
     repo, settings, llmFor: () => llm,
     jsmApp: null, jsmUser: null, confluence: null,
+    prebuilt, // tests build demo cases through the scripted model unless they ask for prebuilt ones
     users: { isLead: async (a) => leads.includes(a), names: async (ids) => Object.fromEntries(ids.map((i) => [i, names[i] || `User ${i}`])), search: async () => [] },
     enqueue: { buildCase: async (ids) => { for (const id of ids) jobs.push(['case', id]); }, runTurn: async (id) => { jobs.push(['turn', id]); } },
   });

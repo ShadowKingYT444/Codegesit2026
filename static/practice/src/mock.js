@@ -9,6 +9,7 @@ export function mockBackend() {
   const cases = pack.tickets.map((t, i) => ({ id: `c${i}`, key: t.key, requestType: t.request_type, summary: t.summary, t }));
   const runs = {};
   const turns = {};
+  const final = {}; // the finished turn, revealed in two steps by getTurn
   let n = 0;
   const ok = (data) => ({ ok: true, data });
   const caseView = (c) => ({ id: c.id, key: c.key, requestType: c.requestType, summary: c.summary, opening: c.t.thread[0].body, customerName: 'Dana Ortiz' });
@@ -26,12 +27,19 @@ export function mockBackend() {
       const custMsgs = r.c.t.thread.filter((m) => m.from === 'customer');
       const fix = /tcp|gateway/i.test(text);
       const errors = /reinstall/i.test(text) ? [{ type: 'wrong_fix', quote: text.slice(0, 60), source: 'KB-1: Do not reinstall GlobalProtect 6.1+ as a first step.' }] : /version/i.test(text) && r.turns.length > 1 ? [{ type: 'asked_known_info', quote: 'Which version…', source: 'Customer, reply 1: "Version says 6.1.3."' }] : [];
-      turns[id] = { id, n: r.turns.length + 1, trainee: text, status: 'done', mark: errors.length ? (errors[0].type === 'wrong_fix' ? 'red' : 'amber') : 'green', grade: { errors, good: errors.length ? '' : 'Clear, specific question.' }, verdict: fix ? 'solved' : null, reply: fix ? 'Connected!! Thank you. It is a bit slow but I have what I need.' : (custMsgs[r.step++]?.body || "I'm not sure, sorry. I'm not very technical."), released: [] };
+      final[id] = { id, n: r.turns.length + 1, trainee: text, status: 'done', mark: errors.length ? (errors[0].type === 'wrong_fix' ? 'red' : 'amber') : 'green', grade: { errors, good: errors.length ? '' : 'Clear, specific question.' }, verdict: fix ? 'solved' : null, reply: fix ? 'Connected!! Thank you. It is a bit slow but I have what I need.' : (custMsgs[r.step++]?.body || "I'm not sure, sorry. I'm not very technical."), released: [] };
+      turns[id] = { id, n: final[id].n, trainee: text, status: 'pending' };
       r.turns.push(id);
       if (fix) { r.status = 'solved'; r.endedAt = Date.now(); }
       return ok({ turnId: id });
     },
-    getTurn: ({ turnId }) => ok({ turn: turns[turnId], runStatus: Object.values(runs).find((r) => r.turns.includes(turnId)).status }),
+    // like the real backend: first the customer reply ('replied'), then the grade ('done')
+    getTurn: ({ turnId }) => {
+      const t = turns[turnId], f = final[turnId];
+      if (t.status === 'pending') turns[turnId] = { ...f, status: 'replied', grade: null, mark: null };
+      else if (t.status === 'replied') turns[turnId] = f;
+      return ok({ turn: turns[turnId], runStatus: Object.values(runs).find((r) => r.turns.includes(turnId)).status });
+    },
     endRun: ({ runId }) => { runs[runId].status = 'ended'; runs[runId].endedAt = Date.now(); return ok(runView(runs[runId])); },
     debrief: ({ runId }) => { const r = runs[runId]; return ok({ case: caseView(r.c), status: r.status, realThread: r.c.t.thread, resolution: r.c.t.resolution, myRun: { opening: r.c.t.thread[0].body, turns: r.turns.map((id) => turns[id]) }, facts: [{ id: 'h1', detail: 'On the hotel guest wifi', asked_by: 'the network', turn: 1 }, { id: 'h2', detail: 'GlobalProtect 6.1.3', asked_by: 'the version', turn: null }] }); },
     searchKb: ({ q }) => ok(pack.kb.filter((k) => !q || `${k.title} ${k.body}`.toLowerCase().includes(String(q).toLowerCase().split(' ')[0])).map((k) => ({ id: k.id, title: k.title, excerpt: k.body.slice(0, 160) }))),
@@ -44,7 +52,7 @@ export function mockBackend() {
     setCaseStatus: () => ok({ ok: true }), retryCase: () => ok({ ok: true }), deleteTrack: () => ok({ ok: true }),
     searchUsers: () => ok([{ accountId: 'a3', displayName: 'Robin Chen' }]),
     assign: () => H.trackDetail(), unassign: () => H.trackDetail(),
-    dashboard: () => ok({ overrides: 1, gradedTurns: 31, trainees: [
+    dashboard: () => ok({ overrides: 1, gradedTurns: 31, summary: { trainees: 2, repsWeek: 14, readyConfirmed: 1, readyPending: 1, repsToReady: 9, overrideRate: 3 }, trainees: [
       { accountId: 'a1', name: 'Jordan Lee', runs: 7, solveRate: 86, turnsToSolve: 4.2, greenRate: 74, weakSpots: spots, tracks: [{ id: 't1', name: 'IT desk', solved: 8, total: 9, ready: true, redRate: 0.1, confirmed: false }] },
       { accountId: 'a2', name: 'Sam Patel', runs: 3, solveRate: 50, turnsToSolve: 6, greenRate: 52, weakSpots: { ...spots, top: ['wrong_fix', 'asked_known_info'] }, tracks: [{ id: 't1', name: 'IT desk', solved: 2, total: 9, ready: false, redRate: 0.3, confirmed: false }] },
     ] }),
