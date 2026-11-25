@@ -208,3 +208,18 @@ test('the customer reply is saved before the grade, then the grade lands', async
   assert.equal(t.turn.status, 'done');
   assert.ok(t.turn.reply && t.turn.grade);
 });
+
+test('lead dashboard summary: reps this week, ready trainees, reps to ready', async () => {
+  const app = await testApp();
+  const trackId = await readyTrack(app);
+  await app.svc.assign(LEAD, trackId, [TRAINEE]);
+  const caseId = (await app.svc.trackDetail(LEAD, trackId)).cases.find((c) => c.key === 'ITSD-4102').id;
+  const run = await app.svc.startRun(TRAINEE, caseId);
+  await app.svc.endRun(TRAINEE, run.id);
+  const d = await app.svc.dashboard(LEAD);
+  assert.equal(d.summary.trainees, 1);
+  assert.equal(d.summary.repsWeek, 1);
+  assert.equal(d.summary.readyConfirmed, 0);
+  assert.equal(d.summary.repsToReady, null);
+  assert.equal(d.trainees[0].tracks[0].reps, 1);
+});

@@ -86,6 +86,8 @@ describe('lead flow', () => {
     fireEvent.click(await screen.findByRole('tab', { name: 'Team' }, T));
     expect(await screen.findByText('Team progress', {}, T)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Confirm ready' })).toBeTruthy();
+    expect(screen.getByText('practice reps this week')).toBeTruthy();
+    expect(screen.getByText('median reps to ready')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Jordan Lee' }));
     expect(await screen.findByText('Errors by type', { exact: false }, T)).toBeTruthy();
     expect(screen.getByText('Next practice tickets')).toBeTruthy();

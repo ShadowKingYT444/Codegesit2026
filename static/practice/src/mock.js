@@ -52,7 +52,7 @@ export function mockBackend() {
     setCaseStatus: () => ok({ ok: true }), retryCase: () => ok({ ok: true }), deleteTrack: () => ok({ ok: true }),
     searchUsers: () => ok([{ accountId: 'a3', displayName: 'Robin Chen' }]),
     assign: () => H.trackDetail(), unassign: () => H.trackDetail(),
-    dashboard: () => ok({ overrides: 1, gradedTurns: 31, trainees: [
+    dashboard: () => ok({ overrides: 1, gradedTurns: 31, summary: { trainees: 2, repsWeek: 14, readyConfirmed: 1, readyPending: 1, repsToReady: 9, overrideRate: 3 }, trainees: [
       { accountId: 'a1', name: 'Jordan Lee', runs: 7, solveRate: 86, turnsToSolve: 4.2, greenRate: 74, weakSpots: spots, tracks: [{ id: 't1', name: 'IT desk', solved: 8, total: 9, ready: true, redRate: 0.1, confirmed: false }] },
       { accountId: 'a2', name: 'Sam Patel', runs: 3, solveRate: 50, turnsToSolve: 6, greenRate: 52, weakSpots: { ...spots, top: ['wrong_fix', 'asked_known_info'] }, tracks: [{ id: 't1', name: 'IT desk', solved: 2, total: 9, ready: false, redRate: 0.3, confirmed: false }] },
     ] }),

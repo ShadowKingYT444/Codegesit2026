@@ -32,16 +32,85 @@ modules:
 
         Read back the action result in plain words. Never invent scores or ticket details that the actions did not return.
         You never see the real ticket of a practice case, so never guess its solution.
+        Use list-practice-tickets when a user asks what they can practise.
+        Use send-practice-reply to pass the trainee's reply to the customer in their active run. Send the trainee's words
+        exactly as they wrote them; never write the reply for them. Then show the customer's answer and the grade.
+        Use practice-debrief when a run ends or the trainee asks how they did.
       conversationStarters:
         - Give me a hard VPN ticket to practise
         - What do I keep getting wrong?
         - Who is ready for the queue?
       actions:
         - start-practice
+        - send-practice-reply
+        - practice-debrief
+        - list-practice-tickets
         - weak-spots
         - queue-readiness
         - build-track
+      skills:
+        - ride-along-practice
+  rovo:mcp:
+    - key: ride-along-mcp
+      name: Ride-Along practice
+      tools:
+        - list-practice-tickets
+        - start-practice
+        - send-practice-reply
+        - practice-debrief
+        - weak-spots
+        - queue-readiness
+        - build-track
+  rovo:skill:
+    - key: ride-along-practice
+      source:
+        dir: skills/ride-along-practice
+      dependencies:
+        tools:
+          - list-practice-tickets
+          - start-practice
+          - send-practice-reply
+          - practice-debrief
+          - weak-spots
   action:
+    - key: list-practice-tickets
+      name: List practice tickets
+      function: action-list-practice-tickets
+      actionVerb: GET
+      description: List the caller's Ride-Along practice tickets by track, which ones are solved, and the suggested next tickets.
+      inputs:
+        track:
+          title: Track name
+          type: string
+          required: false
+          description: Optional track name filter. Leave empty for all tracks.
+    - key: send-practice-reply
+      name: Send practice reply
+      function: action-send-practice-reply
+      actionVerb: UPDATE
+      description: Send the trainee's reply to the AI customer in their active Ride-Along practice run. Returns the customer's answer and the grade of the reply against the team's KB and SOPs.
+      inputs:
+        message:
+          title: Reply
+          type: string
+          required: true
+          description: The trainee's reply to the customer, exactly as the trainee wrote it.
+        runId:
+          title: Run id
+          type: string
+          required: false
+          description: Optional practice run id. Leave empty for the caller's active run.
+    - key: practice-debrief
+      name: Practice debrief
+      function: action-practice-debrief
+      actionVerb: GET
+      description: Debrief of the caller's practice run. Ends the active run first. Shows the details the trainee drew out, the details never asked for, and the real fix.
+      inputs:
+        runId:
+          title: Run id
+          type: string
+          required: false
+          description: Optional practice run id. Leave empty for the active or the latest run.
     - key: start-practice
       name: Start practice run
       function: action-start-practice
@@ -125,6 +194,13 @@ modules:
       handler: index.queueReadiness
     - key: action-build-track
       handler: index.buildTrack
+    - key: action-list-practice-tickets
+      handler: index.listPracticeTickets
+    - key: action-send-practice-reply
+      handler: index.sendPracticeReply
+      timeoutSeconds: 55
+    - key: action-practice-debrief
+      handler: index.practiceDebrief
   sql:
     - key: main
       engine: mysql

@@ -113,7 +113,7 @@ export function makeService(deps) {
       return { id: run.id, kind: run.kind, status: run.status, startedAt: run.startedAt, endedAt: run.endedAt, turnLimit: s.turnLimit, case: traineeCaseView(c), turns: (await repo.turnsForRun(runId)).map((t) => turnView(t, { lead: lead && run.kind === 'preview' })) };
     },
 
-    async send(accountId, runId, text) {
+    async send(accountId, runId, text, { inline = false } = {}) {
       const run = await loadRunFor(accountId, runId);
       if (run.accountId !== accountId) fail('forbidden', 'Only the trainee can reply in this run.');
       if (run.status !== 'active') fail('closed', 'This run has ended.');
@@ -128,6 +128,7 @@ export function makeService(deps) {
       const n = done + 1;
       const c = await repo.getCase(run.caseId);
       const id = await repo.addTurn({ runId, n, accountId, requestType: c.requestType, trainee: msg });
+      if (inline) { await service.processTurn(id); return { turnId: id }; } // MCP and Rovo actions wait for the answer
       await enqueue.runTurn(id);
       return { turnId: id };
     },
@@ -137,6 +138,12 @@ export function makeService(deps) {
       if (!t) fail('not_found', 'Turn not found.');
       const run = await loadRunFor(accountId, t.runId);
       return { turn: turnView(t, { lead: run.kind === 'preview' }), runStatus: run.status };
+    },
+
+    /** The caller's newest practice run (optionally only an active or only an ended one). For chat and MCP clients. */
+    async latestRun(accountId, { active } = {}) {
+      const runs = (await repo.runsFor(accountId)).filter((r) => active == null || (r.status === 'active') === active);
+      return runs[0] || null;
     },
 
     async endRun(accountId, runId) {
@@ -373,7 +380,8 @@ export function makeService(deps) {
         const tr = await repo.getTrack(tid); if (!tr) continue;
         const cases = (await repo.listCases(tid, { full: true })).filter((c) => c.status === 'ready');
         pool.push(...cases);
-        tracks.push({ id: tid, name: tr.name, ...readiness(cases.map((c) => c.id), solvedCases, marks), confirmed: marksConfirmed.some((m) => m.trackId === tid) });
+        const reps = ended.filter((r) => r.trackId === tid).length; // practice reps on this track so far
+        tracks.push({ id: tid, name: tr.name, ...readiness(cases.map((c) => c.id), solvedCases, marks), confirmed: marksConfirmed.some((m) => m.trackId === tid), reps });
       }
       const avg = (xs) => (xs.length ? Math.round((xs.reduce((a, c) => a + c, 0) / xs.length) * 10) / 10 : null);
       return {
@@ -382,6 +390,7 @@ export function makeService(deps) {
         turnsToSolve: avg(solvedRuns.map((r) => r.state.turns.length)),
         greenRate: marks.length ? Math.round((marks.filter((m) => m === 'green').length / marks.length) * 100) : null,
         weakSpots: spots, tracks, picks: nextPicks(pool, spots, solvedCases),
+        endedAt: ended.map((r) => r.endedAt || r.startedAt),
         recentRuns: runs.slice(0, 10).map((r) => ({ id: r.id, caseId: r.caseId, status: r.status, turns: r.state.turns.length, startedAt: r.startedAt })),
         cost: runs.reduce((a, r) => ({ calls: a.calls + r.usage.calls, input: a.input + r.usage.input, output: a.output + r.usage.output }), { calls: 0, input: 0, output: 0 }),
       };
@@ -394,7 +403,22 @@ export function makeService(deps) {
       const trainees = [];
       for (const id of ids) trainees.push({ name: names[id] || id, ...(await service.traineeStats(accountId, id)) });
       const graded = trainees.reduce((a, t) => a + t.weakSpots.turns, 0);
-      return { trainees, overrides: await repo.overrideCount(), gradedTurns: graded };
+      const overrides = await repo.overrideCount();
+      // the numbers a lead reads first: practice volume, who is ready, and how many reps it took
+      const weekAgo = now() - 7 * 86400000;
+      const repsWeek = trainees.reduce((a, t) => a + t.endedAt.filter((at) => at >= weekAgo).length, 0);
+      const trackRows = trainees.flatMap((t) => t.tracks);
+      const readyReps = trackRows.filter((tr) => tr.ready || tr.confirmed).map((tr) => tr.reps).sort((x, y) => x - y);
+      const median = readyReps.length ? readyReps[Math.floor((readyReps.length - 1) / 2)] : null;
+      const summary = {
+        trainees: trainees.length,
+        repsWeek,
+        readyConfirmed: trainees.filter((t) => t.tracks.some((tr) => tr.confirmed)).length,
+        readyPending: trainees.filter((t) => t.tracks.some((tr) => tr.ready && !tr.confirmed)).length,
+        repsToReady: median,
+        overrideRate: graded ? Math.round((overrides / graded) * 100) : null,
+      };
+      return { trainees, overrides, gradedTurns: graded, summary };
     },
 
     async confirmReady(accountId, traineeId, trackId) {
