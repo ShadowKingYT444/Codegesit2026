@@ -9,6 +9,7 @@
 //   confluence,                // jira/confluence.js (as the app)
 //   users: { isLead(accountId), names(accountIds) -> {id: name}, search(q) -> [{accountId, displayName}] },
 //   enqueue: { buildCase(caseIds[]), runTurn(turnId) },
+//   prebuilt,                  // optional: demo cases keyed 'packId:ticketKey' (default: src/demo/prebuilt.js)
 //   now()
 // }
 import { reveal, speak } from './engine/customer.js';
@@ -19,13 +20,16 @@ import { practiceValue } from './engine/scoring.js';
 import { weakSpots, nextPicks, readiness } from './engine/coach.js';
 import { BM25 } from './engine/bm25.js';
 import { packById, PACKS } from './demo/packs.js';
+import { PREBUILT } from './demo/prebuilt.js';
 
 export class AppError extends Error { constructor(code, message) { super(message); this.code = code; } }
 const fail = (code, msg) => { throw new AppError(code, msg); };
 const MAX_MSG = 4000;
+const answered = (t) => t.status === 'done' || t.status === 'replied';
 
 export function makeService(deps) {
   const { repo, settings, llmFor, users, enqueue } = deps;
+  const prebuilt = deps.prebuilt || PREBUILT;
   const now = deps.now || (() => Date.now());
 
   const requireLead = async (accountId) => { if (!(await users.isLead(accountId))) fail('forbidden', 'Only Ride-Along leads can do this.'); };
@@ -118,10 +122,10 @@ export function makeService(deps) {
       const turns = await repo.turnsForRun(runId);
       if (turns.some((t) => t.status === 'pending')) fail('busy', 'The customer is still answering your last reply.');
       const s = await settings.get();
-      const done = turns.filter((t) => t.status === 'done').length;
+      const done = turns.filter(answered).length;
       if (done >= s.turnLimit) fail('closed', 'Turn limit reached.');
       // a failed turn is replaced by the new one
-      const n = turns.filter((t) => t.status === 'done').length + 1;
+      const n = done + 1;
       const c = await repo.getCase(run.caseId);
       const id = await repo.addTurn({ runId, n, accountId, requestType: c.requestType, trainee: msg });
       await enqueue.runTurn(id);
@@ -145,7 +149,7 @@ export function makeService(deps) {
       const run = await loadRunFor(accountId, runId);
       if (run.status === 'active') fail('closed', 'Finish or end the run to see the real ticket.');
       const c = await repo.getCase(run.caseId);
-      const turns = (await repo.turnsForRun(runId)).filter((t) => t.status === 'done');
+      const turns = (await repo.turnsForRun(runId)).filter(answered);
       return {
         case: traineeCaseView(c), status: run.status,
         realThread: c.debrief, resolution: c.resolution,
@@ -192,13 +196,19 @@ export function makeService(deps) {
           const r = await speak(pc.customer, state, t.trainee, release, llm, verdict);
           return { ...r, release, kind, verdict, why };
         })();
-        const gradePart = run.kind === 'preview' ? Promise.resolve(null) : gradeReply(pc, kbPool, track.sop, { turns: state.turns, replies: state.replies }, t.trainee, llm);
-        const [cust, grade] = await Promise.all([customerPart, gradePart]);
-        await repo.finishTurn(turnId, { reply: cust.reply, released: cust.release, kind: cust.kind, verdict: cust.verdict, grade, mark: grade?.mark || null });
-        const usage = { calls: run.usage.calls + llm.usage.calls, input: run.usage.input + llm.usage.input, output: run.usage.output + llm.usage.output };
-        await repo.saveRunState(run.id, cust.state, usage);
+        // the grade starts at the same time, but the customer reply is saved (and shown) as soon as it is ready
+        const gradePart = (run.kind === 'preview' ? Promise.resolve(null) : gradeReply(pc, kbPool, track.sop, { turns: state.turns, replies: state.replies }, t.trainee, llm))
+          .catch((e) => ({ failed: e.message || String(e) }));
+        const cust = await customerPart;
+        await repo.saveReply(turnId, { reply: cust.reply, released: cust.release, kind: cust.kind, verdict: cust.verdict });
+        await repo.saveRunState(run.id, cust.state, run.usage);
         if (cust.verdict === 'solved') await repo.endRun(run.id, 'solved');
         else if (cust.state.turns.length >= s.turnLimit) await repo.endRun(run.id, 'limit');
+        const grade = await gradePart;
+        const ok = grade && !grade.failed ? grade : null;
+        await repo.saveGrade(turnId, { grade: ok, mark: ok?.mark || null });
+        const usage = { calls: run.usage.calls + llm.usage.calls, input: run.usage.input + llm.usage.input, output: run.usage.output + llm.usage.output };
+        await repo.saveRunState(run.id, cust.state, usage);
         return { done: true, verdict: cust.verdict };
       } catch (e) {
         await repo.failTurn(turnId, e.message || String(e));
@@ -231,10 +241,17 @@ export function makeService(deps) {
       if (source === 'demo') {
         const pack = packById(packId) || fail('bad_request', 'Unknown demo pack.');
         const id = await repo.createTrack({ name: name || pack.title, source, settings: trackSettings, sop: pack.sop, kb: pack.kb, createdBy: accountId });
-        const caseIds = [];
-        for (const t of pack.tickets.slice(0, s.maxCasesPerTrack)) caseIds.push(await repo.addCase({ trackId: id, key: t.key, requestType: t.request_type, summary: t.summary }));
-        await enqueue.buildCase(caseIds);
-        return { id, cases: caseIds.length };
+        // demo cases are prebuilt (scripts/prebuild-demo.mjs), so a demo track is ready at once with no model calls
+        const toBuild = [];
+        let ready = 0;
+        for (const t of pack.tickets.slice(0, s.maxCasesPerTrack)) {
+          const cid = await repo.addCase({ trackId: id, key: t.key, requestType: t.request_type, summary: t.summary });
+          const pre = prebuilt[`${pack.id}:${t.key}`];
+          if (pre) { await repo.saveCase(cid, structuredClone(pre), 'ready'); ready++; } else toBuild.push(cid);
+        }
+        if (toBuild.length) await enqueue.buildCase(toBuild);
+        else await repo.setTrackStatus(id, 'ready');
+        return { id, cases: ready + toBuild.length, ready };
       }
       if (source !== 'jsm') fail('bad_request', 'Pick a source.');
       if (!String(jql || '').trim()) fail('bad_request', 'Enter a JQL filter of solved tickets.');

@@ -27,6 +27,9 @@ describe('trainee flow', () => {
     const box = screen.getByLabelText('Your reply to the customer');
     fireEvent.change(box, { target: { value: 'What network are you on right now?' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    // the customer reply shows first, while the grade is still on its way
+    expect(await screen.findByText(/Checking your reply against the KB/, {}, T)).toBeTruthy();
+    expect(screen.queryByText(/Clear, specific question/)).toBeNull();
     expect(await screen.findByText(/Clear, specific question/, {}, T)).toBeTruthy();
 
     fireEvent.change(box, { target: { value: 'Please reinstall GlobalProtect.' } });

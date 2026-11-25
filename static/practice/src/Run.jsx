@@ -13,22 +13,25 @@ const OUTCOME = {
 export default function Run({ runId, go, preview = false }) {
   const run = useLoad(() => call('getRun', { runId }), [runId]);
   const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false);      // waiting for the customer reply
+  const [grading, setGrading] = useState(null);  // turn id whose grade is still on its way
   const [err, setErr] = useState(null);
   const bottom = useRef(null);
   const turns = run.data?.turns || [];
   const visible = turns.filter((t, i) => !(t.status === 'failed' && turns.slice(i + 1).some((u) => u.n === t.n)));
   useEffect(() => { bottom.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' }); }, [visible.length, busy]);
-  useEffect(() => { // resume waiting if the page reloads while a turn is pending
+  useEffect(() => { // resume waiting if the page reloads while a turn is pending, or while its grade is on its way
     const p = turns.find((t) => t.status === 'pending');
-    if (p && !busy) { setBusy(true); waitForTurn(p.id).then(() => run.reload()).catch((e) => setErr(e.message)).finally(() => setBusy(false)); }
+    if (p && !busy) { setBusy(true); waitForTurn(p.id).then(() => run.reload()).catch((e) => setErr(e.message)).finally(() => setBusy(false)); return; }
+    const g = turns.find((t) => t.status === 'replied');
+    if (g && !busy && grading !== g.id) { setGrading(g.id); waitForTurn(g.id, { grade: true }).then(() => run.reload()).catch(() => {}).finally(() => setGrading(null)); }
   }, [run.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (run.loading && !run.data) return <Spinner />;
   if (run.error) return <ErrorBox error={run.error} onRetry={run.reload} />;
   const r = run.data;
   const active = r.status === 'active';
-  const done = visible.filter((t) => t.status === 'done').length;
+  const done = visible.filter((t) => t.status === 'done' || t.status === 'replied').length;
 
   const send = async () => {
     const msg = text.trim();
@@ -38,9 +41,16 @@ export default function Run({ runId, go, preview = false }) {
       const { turnId } = await call('send', { runId, text: msg });
       setText('');
       run.setData({ ...r, turns: [...turns, { id: turnId, n: done + 1, trainee: msg, status: 'pending' }] });
-      await waitForTurn(turnId);
+      const first = await waitForTurn(turnId); // the customer reply comes first
       await run.reload();
-    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+      setBusy(false);
+      if (first.turn.status === 'replied') { // the grade lands a moment later
+        setGrading(turnId);
+        await waitForTurn(turnId, { grade: true }).catch(() => {});
+        await run.reload();
+        setGrading(null);
+      }
+    } catch (e) { setErr(e.message); setBusy(false); }
   };
   const end = async () => { if (confirm('End this practice run and see the real ticket?')) { await call('endRun', { runId }); await run.reload(); } };
 
@@ -64,7 +74,7 @@ export default function Run({ runId, go, preview = false }) {
           <ol className="thread" aria-live="polite">
             <li className="msg customer"><div className="who">{r.case.customerName}</div><div className="body">{r.case.opening}</div></li>
             {visible.map((t) => (
-              <TurnItem key={t.id} t={t} customer={r.case.customerName} preview={preview} />
+              <TurnItem key={t.id} t={t} customer={r.case.customerName} preview={preview} grading={!preview && t.status === 'replied'} />
             ))}
             {busy && <li className="msg customer typing"><div className="who">{r.case.customerName}</div><div className="body"><span className="dots"><i /><i /><i /></span></div></li>}
             <li ref={bottom} />
@@ -100,16 +110,17 @@ export default function Run({ runId, go, preview = false }) {
   );
 }
 
-function TurnItem({ t, customer, preview }) {
+function TurnItem({ t, customer, preview, grading }) {
   return (
     <>
       <li className="msg agent">
         <div className="who">You {t.mark && <Mark mark={t.mark} />}</div>
         <div className="body">{t.trainee}</div>
-        {t.grade && <GradeLines grade={t.grade} mark={t.mark} />}
+        {t.grade && <div className="grade-in"><GradeLines grade={t.grade} mark={t.mark} /></div>}
+        {grading && <div className="grading muted small" role="status"><span className="dots"><i /><i /><i /></span> Checking your reply against the KB and SOPs</div>}
         {t.status === 'failed' && <div className="error-box">{t.error}</div>}
       </li>
-      {t.status === 'done' && (
+      {(t.status === 'done' || t.status === 'replied') && (
         <li className="msg customer">
           <div className="who">{customer}{t.verdict === 'solved' && <Lozenge tone="good">Fixed</Lozenge>}{t.verdict === 'made_worse' && <Lozenge tone="bad">Worse</Lozenge>}</div>
           <div className="body">{t.reply}</div>
